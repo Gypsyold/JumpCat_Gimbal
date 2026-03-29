@@ -10,8 +10,27 @@
 #include "jy61p_task.h"
 #include "vofa_task.h"
 
+/*
+本任务主要测试功能是：
+实现通过VOFA上位机来设定目标yaw角，之后与JY61P测得的yaw角做差。角度误差（°）输入给PID,输出目标速度（rad/s）
+之后把这个目标速度输入给电机的MIT模式移动到目标位置
+
+那么文件的任务就是：
+在vofa_task.cpp任务中实现上位机更改目标yaw角，
+
+目标yaw角在该文件中入出，然后将JY61P测得的yaw角在该文件也引入
+在该文件实现角度误差（°）输入给PID,输出目标速度（rad/s）
+
+输出的目标速度从该文件引出，到motor_dm_task.cpp中引入
+
+*/
+
+
 // JY61P的队列引用
 extern QueueHandle_t xIMUDataQueue;
+
+// motor_dm_task的目标速度设置
+extern void Motor_DM_Set_Speed(uint8_t motor_id, float speed_rad_s);
 
 // ========== PID对象 ==========
 Class_PID Set_Angle_PID;
@@ -23,6 +42,8 @@ static TaskHandle_t xSetAngleTaskHandle = NULL;
 static SemaphoreHandle_t xTargetMutex = NULL;
 
 // ========== 目标角度变量 ==========
+static bool control_enable = false;
+
 static float target_yaw = 0.0f;
 static float target_pitch = 0.0f;
 static float target_roll = 0.0f;
@@ -57,16 +78,19 @@ static float Get_Target_Angle(float *target)
 void Set_Target_Yaw(float yaw_deg)
 {
     Set_Target_Angle(&target_yaw, yaw_deg);
+    control_enable = true;  // 收到命令，使能控制
 }
 
 void Set_Target_Pitch(float pitch_deg)
 {
     Set_Target_Angle(&target_pitch, pitch_deg);
+    control_enable = true;  // 收到命令，使能控制
 }
 
 void Set_Target_Roll(float roll_deg)
 {
     Set_Target_Angle(&target_roll, roll_deg);
+    control_enable = true;  // 收到命令，使能控制
 }
 
 // ========== 内部接口（读取目标角度）==========
@@ -175,6 +199,10 @@ static void vSetAngleTask(void *pvParameters)
     
     float local_yaw, local_pitch, local_roll;
     float target_yaw_local, target_pitch_local, target_roll_local;
+
+    float error_yaw_angle,error_pitch_angle,error_roll_angle;  // 记录误差输入给电机用的
+    float output_speed_dps;      // PID输出速度（度/秒）
+    float output_speed_rad_s;    // 转换后的速度（弧度/秒）
     
     for(;;)
     {
@@ -191,8 +219,34 @@ static void vSetAngleTask(void *pvParameters)
         test_error_pitch = Normalize_Angle_Error(target_pitch_local, local_pitch);
         test_error_roll = Normalize_Angle_Error(target_roll_local, local_roll);
 
-        
-        
+
+        error_yaw_angle = Normalize_Angle_Error(target_yaw_local, local_yaw);
+        error_pitch_angle = Normalize_Angle_Error(target_pitch_local, local_pitch);
+        error_roll_angle = Normalize_Angle_Error(target_roll_local, local_roll);
+
+
+
+        if(control_enable)
+        {
+            Set_Angle_PID.Set_Target(0.0f);
+            Set_Angle_PID.Set_Now(error_yaw_angle);
+
+            Set_Angle_PID.TIM_Calculate_PeriodElapsedCallback();
+
+            output_speed_dps = -Set_Angle_PID.Get_Out();
+            output_speed_rad_s = output_speed_dps * BASIC_MATH_DEG_TO_RAD;
+
+
+            Motor_DM_Set_Speed(MOTOR_X, output_speed_rad_s);
+
+        }else
+        {
+            Motor_DM_Set_Speed(MOTOR_X,0.0f);
+
+        }
+
+
+
         vTaskDelay(period_ms);
     }
 }
@@ -220,6 +274,9 @@ void Set_Angle_Task_Create(void)
     test_error_pitch = 0.0f;
     test_error_roll = 0.0f;
     
+     control_enable = false;
+
+    Set_Angle_PID.Init(1, 0, 0, 0.0f, 0.0f, 200.0f, 0.1f);  
     // 创建任务
     BaseType_t ret = xTaskCreate(vSetAngleTask, "SetAngleTask", 512, NULL, 2, &xSetAngleTaskHandle);
     if (ret != pdPASS)

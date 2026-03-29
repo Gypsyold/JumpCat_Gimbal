@@ -49,7 +49,8 @@ static char Vofa_Variable_List[][VOFA_RX_VARIABLE_ASSIGNMENT_MAX_LENGTH] =
 {
     {"yaw"},
     {"pitch"},
-    {"roll"}
+    {"roll"},
+
 };
 
 // ========== 静态函数声明 ==========
@@ -81,19 +82,16 @@ static void vVofaSendTask(void *pvParameters)
             target_pitch = Test_Get_Target_Pitch();
             target_roll = Test_Get_Target_Roll();
             
-            current_yaw = Test_Get_Current_Yaw();
-            current_pitch = Test_Get_Current_Pitch();
-            current_roll = Test_Get_Current_Roll();
+
             
             error_yaw = Test_Get_Error_Yaw();
             error_pitch = Test_Get_Error_Pitch();
             error_roll = Test_Get_Error_Roll();
             
-            // 发送12个数据
-            Vofa_UART.Set_Data(12, 
+            // 发送JustFloat模式数据
+            Vofa_UART.Set_Data(9, 
                                &yaw, &pitch, &roll,
-                               &target_yaw, &target_pitch, &target_roll,
-                               &current_yaw, &current_pitch, &current_roll,
+                               &target_yaw, &target_pitch, &target_roll,                              
                                &error_yaw, &error_pitch, &error_roll);
             
             Vofa_UART.TIM_1ms_Write_PeriodElapsedCallback();
