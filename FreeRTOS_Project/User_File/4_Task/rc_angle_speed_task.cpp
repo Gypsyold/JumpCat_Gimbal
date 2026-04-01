@@ -99,6 +99,23 @@ void Set_Target_Roll_RC(float roll_deg)
 {
     axisRoll_RC.SetTargetAngle(roll_deg);
 }
+
+// ========== 外部接口（遥控器写入目标角速度）==========
+void Set_Target_Speed_Yaw_RC(float yaw_speed)
+{
+    axisYaw_RC.SetTargetSpeed(yaw_speed);
+}
+
+void Set_Target_Speed_Pitch_RC(float pitch_speed)
+{
+    axisPitch_RC.SetTargetSpeed(pitch_speed);
+}
+
+void Set_Target_Speed_Roll_RC(float roll_speed)
+{
+    axisRoll_RC.SetTargetSpeed(roll_speed);
+}
+
 // ========== 外部接口（VOFA读出目标角度）==========
 float Test_Get_Target_Yaw_RC(void)
 {
@@ -115,6 +132,10 @@ float Test_Get_Target_Roll_RC(void)
     return axisRoll_RC.GetTargetAngle();
 }
 
+
+
+
+
 // ========== 获取当前角度 ==========
 static void Get_Current_Angles(float *yaw, float *pitch, float *roll)
 {
@@ -129,11 +150,37 @@ static void Get_Current_Angles(float *yaw, float *pitch, float *roll)
         last_yaw = imu_data_rc.yaw;
         last_pitch = imu_data_rc.pitch;
         last_roll = imu_data_rc.roll;
+
+
     }
     
     *yaw = last_yaw;
     *pitch = last_pitch;
     *roll = last_roll;
+
+}
+// ========== 获取当前角速度 ==========
+static void Get_Current_Speed(float *yaw_speed, float *pitch_speed, float *roll_speed)
+{
+    static float last_yaw_speed = 0.0f;
+    static float last_pitch_speed = 0.0f;
+    static float last_roll_speed = 0.0f;
+    
+    AttitudeData_t imu_data_rc;
+    
+    if (xQueuePeek(xIMUDataQueue, &imu_data_rc, 0) == pdTRUE)
+    {
+        last_yaw_speed = imu_data_rc.gyro_z * 0.01745329252f;
+        last_pitch_speed = imu_data_rc.gyro_y * 0.01745329252f;
+        last_roll_speed = imu_data_rc.gyro_x * 0.01745329252f;
+
+
+    }
+    
+    *yaw_speed = last_yaw_speed;
+    *pitch_speed = last_pitch_speed;
+    *roll_speed = last_roll_speed;
+
 }
 
 
@@ -142,39 +189,53 @@ static void vRCControlTask(void *pvParameters)
 {
     const TickType_t period_ms = pdMS_TO_TICKS(10);
     float local_yaw, local_pitch, local_roll;
+    float local_yaw_speed, local_pitch_speed, local_roll_speed;
 
 
     while (1)
     {
         // 获取当前角度
         Get_Current_Angles(&local_yaw, &local_pitch, &local_roll);
+        // 获取当前角速度
+        Get_Current_Speed(&local_yaw_speed,&local_pitch_speed,&local_roll_speed);
 
         // 更新各个轴的当前角度
         axisYaw_RC.SetCurrentAngle(local_yaw);      // Yaw轴使用yaw角
         axisRoll_RC.SetCurrentAngle(local_roll);    // Roll轴使用roll角（控制电机）
         axisPitch_RC.SetCurrentAngle(local_pitch);  // Pitch轴只记录，不控制电机
 
-        // 更新测试误差（供VOFA读取）
-        // float RC_test_error_yaw = axisYaw_RC.GetError();
-        // float RC_test_error_pitch = axisRoll_RC.GetError();
-        // float RC_test_error_roll = axisPitch_RC.GetError();
+        // 更新各个轴的当前角速度
+        axisYaw_RC.SetCurrentSpeed(local_yaw_speed);
+        axisRoll_RC.SetCurrentSpeed(local_roll_speed);
+        axisPitch_RC.SetCurrentSpeed(local_pitch_speed);
         
         float en_flag = Get_Control_Enable_IN_RC();
 
-        if(en_flag == 0)
+        if(en_flag == 0)        // 使能开关是0则使用目标角度控制
         {
             // Yaw轴控制（水平电机）
-            float output_speed_dps_yaw = axisYaw_RC.CalculateOutput();
+            float output_speed_dps_yaw = axisYaw_RC.CalculateAngleOutput();
             float output_speed_rad_s_yaw = output_speed_dps_yaw * BASIC_MATH_DEG_TO_RAD;
             Motor_DM_Set_Speed(MOTOR_X, output_speed_rad_s_yaw);
             
             // Roll轴控制（竖直电机，使用roll角）
-            float output_speed_dps_roll = axisRoll_RC.CalculateOutput();
+            float output_speed_dps_roll = axisRoll_RC.CalculateAngleOutput();
             float output_speed_rad_s_roll = output_speed_dps_roll * BASIC_MATH_DEG_TO_RAD;
             Motor_DM_Set_Speed(MOTOR_Y, output_speed_rad_s_roll);
 
             // Pitch轴只计算误差，不控制电机（只记录）
             // axisPitch_RC.CalculateOutput();  
+
+        }else if(en_flag == -1)     // 使能开关是-1则使用目标角速度控制
+        {
+            float output_speed_rad_s_yaw_gyro = axisYaw_RC.CalculateSpeedOutput();
+            Motor_DM_Set_Speed(MOTOR_X, output_speed_rad_s_yaw_gyro);
+
+            float output_speed_rad_s_roll_gyro = axisRoll_RC.CalculateSpeedOutput();
+            Motor_DM_Set_Speed(MOTOR_Y, output_speed_rad_s_roll_gyro);
+
+            // Pitch轴只计算误差，不控制电机（只记录）
+            // axisPitch_RC.CalculateSpeedOutput();  
 
         }else
         {
@@ -212,13 +273,16 @@ void RC_Angle_Speed_Task_Create(void)
     
     // ========== 设置初始 PID 参数 ==========
     // Yaw轴 PID 参数
-    axisYaw_RC.SetPIDParams(6.0f, 0.0f, 0.0f);
+    axisYaw_RC.SetAnglePID(6.5f, 0.0f, 0.0f);
     
     // Roll轴 PID 参数
-    axisRoll_RC.SetPIDParams(6.0f, 0.0f, 0.0f);
+    axisRoll_RC.SetAnglePID(6.5f, 0.0f, 0.0f);
     
     // Pitch轴 PID 参数（虽然不控制电机，但可以设置参数用于记录）
-    axisPitch_RC.SetPIDParams(6.0f, 0.0f, 0.0f);
+    axisPitch_RC.SetAnglePID(6.0f, 0.0f, 0.0f);
+
+    axisYaw_RC.SetSpeedPID(0.5f, 0.0f, 0.1f);    // Yaw速度环
+    axisRoll_RC.SetSpeedPID(0.5f, 0.0f, 0.1f);   // Roll速度环
 
     // ========== 初始化使能标志 ==========
     control_enable_rc = 1.0f;

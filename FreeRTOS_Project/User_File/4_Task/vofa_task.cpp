@@ -109,8 +109,15 @@ static void vVofaSendTask(void *pvParameters)
             float yaw = imu_data.yaw;
             float pitch = imu_data.pitch;
             float roll = imu_data.roll;
+            float x_gyro = imu_data.gyro_x;
+            float y_gyro = imu_data.gyro_y;
+            float z_gyro = imu_data.gyro_z;
+
+            Vofa_UART.Set_Data(6, 
+                   &yaw, &pitch, &roll,
+                   &x_gyro, &y_gyro, &z_gyro);      
             
-            // 从 set_angle_test_task 获取数据
+            // // 从 set_angle_test_task 获取数据
             // float target_yaw = Test_Get_Target_Yaw();
             // float target_pitch = Test_Get_Target_Pitch();
             // float target_roll = Test_Get_Target_Roll();
@@ -140,12 +147,12 @@ static void vVofaSendTask(void *pvParameters)
             //                    &kp_y, &ki_y, &kd_y,
             //                    &control_enable);
 
-            float target_yaw = Test_Get_Target_Yaw_RC();
-            float target_pitch = Test_Get_Target_Pitch_RC();
-            float target_roll = Test_Get_Target_Roll_RC();
-            Vofa_UART.Set_Data(6, 
-                               &yaw, &pitch, &roll,
-                               &target_yaw, &target_pitch, &target_roll);           
+            // float target_yaw = Test_Get_Target_Yaw_RC();
+            // float target_pitch = Test_Get_Target_Pitch_RC();
+            // float target_roll = Test_Get_Target_Roll_RC();
+            // Vofa_UART.Set_Data(6, 
+            //                    &yaw, &pitch, &roll,
+            //                    &target_yaw, &target_pitch, &target_roll);           
 
 
 
